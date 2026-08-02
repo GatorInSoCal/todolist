@@ -121,11 +121,11 @@
       showNewListForm: false,
       currentMonth: new Date(),
       draggedItem: null,
-      moveToModal: null
+      moveToModal: null,
+      showAddForm: false
     };
 
     function initializeLists() {
-      // Always ensure we have all 7 days
       state.lists = DAYS.map((day, idx) => {
         const existing = state.lists.find(l => l.name === day);
         return existing || {
@@ -146,6 +146,7 @@
         Object.assign(state, data);
       }
       state.currentMonth = new Date();
+      state.showAddForm = false;
       initializeLists();
       applyTheme();
     }
@@ -185,6 +186,7 @@
       };
       state.items.push(newItem);
       saveState();
+      state.showAddForm = false;
       render();
     }
 
@@ -355,22 +357,35 @@
 
     function renderListView(activeItems, cardBg, textColor, borderColor, secondaryText) {
       return `
-        <!-- Add item -->
+        <!-- Add item button/form -->
         <div style="background: ${cardBg}; border: 1px solid ${borderColor}; padding: 1.5rem; border-radius: 1rem; margin-bottom: 1.5rem; animation: slideIn 0.3s ease-out; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-          <input type="text" id="itemTitle" placeholder="Add a new task..." 
-            style="width: 100%; padding: 0.875rem; border-radius: 0.75rem; border: 1px solid ${borderColor}; background: ${textColor === '#ffffff' ? '#111827' : 'white'}; color: ${textColor}; margin-bottom: 1rem; font-size: 1rem;" 
-            onkeypress="if(event.key==='Enter') addItemFromForm()" />
-          <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem;">
-            <input type="date" id="itemDueDate" 
-              style="padding: 0.75rem; border-radius: 0.75rem; border: 1px solid ${borderColor}; background: ${textColor === '#ffffff' ? '#111827' : 'white'}; color: ${textColor}; font-size: 0.9rem;" />
-            <select id="itemPriority" 
-              style="padding: 0.75rem; border-radius: 0.75rem; border: 1px solid ${borderColor}; background: ${textColor === '#ffffff' ? '#111827' : 'white'}; color: ${textColor}; font-size: 0.9rem; cursor: pointer;">
-              <option value="low">Low</option>
-              <option value="medium" selected>Medium</option>
-              <option value="high">High</option>
-            </select>
-            <button onclick="addItemFromForm()" style="padding: 0.75rem; background: #6366f1; color: white; border: none; border-radius: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.3s;">➕ Add</button>
-          </div>
+          ${!state.showAddForm ? `
+            <button onclick="setState({showAddForm: true}); setTimeout(() => document.getElementById('itemTitle')?.focus(), 100);" 
+              style="width: 100%; padding: 1rem; background: #6366f1; color: white; border: none; border-radius: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.3s; font-size: 1rem;">
+              ➕ Add
+            </button>
+          ` : `
+            <div style="display: flex; flex-direction: column; gap: 1rem;">
+              <input type="text" id="itemTitle" placeholder="Add a new task..." 
+                style="width: 100%; padding: 0.875rem; border-radius: 0.75rem; border: 1px solid ${borderColor}; background: ${textColor === '#ffffff' ? '#111827' : 'white'}; color: ${textColor}; font-size: 1rem;" 
+                onkeypress="if(event.key==='Enter') addItemFromForm()" />
+              <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem;">
+                <input type="date" id="itemDueDate" 
+                  style="padding: 0.75rem; border-radius: 0.75rem; border: 1px solid ${borderColor}; background: ${textColor === '#ffffff' ? '#111827' : 'white'}; color: ${textColor}; font-size: 0.9rem;" />
+                <select id="itemPriority" 
+                  style="padding: 0.75rem; border-radius: 0.75rem; border: 1px solid ${borderColor}; background: ${textColor === '#ffffff' ? '#111827' : 'white'}; color: ${textColor}; font-size: 0.9rem; cursor: pointer;">
+                  <option value="low">Low</option>
+                  <option value="medium" selected>Medium</option>
+                  <option value="high">High</option>
+                </select>
+                <button onclick="addItemFromForm()" style="padding: 0.75rem; background: #6366f1; color: white; border: none; border-radius: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.3s;">Add</button>
+              </div>
+              <button onclick="setState({showAddForm: false})" 
+                style="padding: 0.75rem; background: none; border: 1px solid ${borderColor}; border-radius: 0.75rem; color: ${secondaryText}; font-weight: 600; cursor: pointer; transition: all 0.3s;">
+                Cancel
+              </button>
+            </div>
+          `}
         </div>
 
         <!-- Items -->
@@ -558,6 +573,7 @@
     function setActiveList(id) {
       state.activeList = id;
       state.search = '';
+      state.showAddForm = false;
       saveState();
       render();
     }
