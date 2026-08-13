@@ -114,12 +114,11 @@
       lists: [],
       items: [],
       activeList: null,
-      view: 'list',
+      view: 'lists',
       theme: 'light',
       search: '',
       sortBy: 'manual',
       showNewListForm: false,
-      currentMonth: new Date(),
       draggedItem: null,
       moveToModal: null,
       showAddForm: false,
@@ -129,7 +128,6 @@
     };
 
     function initializeLists() {
-      // Ensure we have all 7 days
       DAYS.forEach((day, idx) => {
         if (!state.lists.find(l => l.name === day)) {
           state.lists.unshift({
@@ -150,10 +148,10 @@
         const data = JSON.parse(saved);
         Object.assign(state, data);
       }
-      state.currentMonth = new Date();
       state.showAddForm = false;
       state.listMenuModal = null;
       state.editingItem = null;
+      state.view = 'lists';
       initializeLists();
       applyTheme();
     }
@@ -163,7 +161,7 @@
         lists: state.lists,
         items: state.items,
         activeList: state.activeList,
-        view: state.view,
+        view: 'lists',
         theme: state.theme,
         search: state.search,
         sortBy: state.sortBy,
@@ -195,45 +193,26 @@
     }
 
     function deleteList(id) {
-      if (confirm(`Delete "${state.lists.find(l => l.id === id)?.name || 'list'}"? Items in this list won't be deleted.`)) {
+      if (confirm(`Delete "${state.lists.find(l => l.id === id)?.name || 'list'}"? This will also delete all items in this list.`)) {
         state.lists = state.lists.filter(l => l.id !== id);
-        // Remove items in this list
         state.items = state.items.filter(i => i.listId !== id);
-        // Switch to another list if deleting the active one
         if (state.activeList === id) {
           state.activeList = state.lists.length > 0 ? state.lists[0].id : null;
         }
         state.editingItem = null;
         state.listMenuModal = null;
+        state.view = 'lists';
         saveState();
         render();
       }
     }
 
-    function openListMenu(id, event) {
-      event.preventDefault();
-      state.listMenuModal = id;
-      state.editingListColor = state.lists.find(l => l.id === id)?.color;
-      render();
-    }
-
-    function changeListColor(listId, color) {
-      const list = state.lists.find(l => l.id === listId);
-      if (list) {
-        list.color = color;
-        state.editingListColor = color;
-        saveState();
-        render();
-      }
-    }
-
-    function addItem(title, dueDate, priority) {
+    function addItem(title, priority) {
       if (!title.trim() || state.activeList === null) return;
       const newItem = {
         id: Date.now(),
         listId: state.activeList,
         title: title,
-        dueDate: dueDate,
         priority: priority,
         completed: false,
         order: state.items.filter(i => i.listId === state.activeList).length
@@ -248,6 +227,12 @@
       const item = state.items.find(i => i.id === id);
       if (item) {
         item.completed = !item.completed;
+        if (item.completed) {
+          // Move to bottom
+          const activeItems = state.items.filter(i => i.listId === state.activeList);
+          const maxOrder = Math.max(...activeItems.map(i => i.order), -1);
+          item.order = maxOrder + 1;
+        }
         saveState();
         render();
       }
@@ -259,11 +244,10 @@
       render();
     }
 
-    function editItem(id, title, dueDate, priority) {
+    function editItem(id, title, priority) {
       const item = state.items.find(i => i.id === id);
       if (item && title.trim()) {
         item.title = title.trim();
-        item.dueDate = dueDate;
         item.priority = priority;
         saveState();
         state.editingItem = null;
@@ -304,13 +288,6 @@
         case 'alphabetical':
           filtered.sort((a, b) => a.title.localeCompare(b.title));
           break;
-        case 'duedate':
-          filtered.sort((a, b) => {
-            if (!a.dueDate) return 1;
-            if (!b.dueDate) return -1;
-            return new Date(a.dueDate) - new Date(b.dueDate);
-          });
-          break;
         case 'priority':
           const order = { high: 0, medium: 1, low: 2 };
           filtered.sort((a, b) => order[a.priority] - order[b.priority]);
@@ -321,97 +298,112 @@
       return filtered;
     }
 
-    function getDaysInMonth(date) {
-      return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
-    }
-
-    function getFirstDayOfMonth(date) {
-      return new Date(date.getFullYear(), date.getMonth(), 1).getDay();
-    }
-
-    function getItemsForDate(date) {
-      const dateStr = date.toISOString().split('T')[0];
-      return getListItems().filter(i => i.dueDate === dateStr);
-    }
-
     function render() {
       const root = document.getElementById('root');
-      const activeListObj = state.lists.find(l => l.id === state.activeList);
-      const activeItems = state.activeList !== null ? getListItems() : [];
-      const completedCount = activeItems.filter(i => i.completed).length;
-      
       const bgColor = state.theme === 'dark' ? '#0a0e27' : '#ffffff';
       const cardBg = state.theme === 'dark' ? '#1a2847' : '#f5f7fc';
       const textColor = state.theme === 'dark' ? '#ffffff' : '#1a1a1a';
       const secondaryText = state.theme === 'dark' ? '#b0b8cc' : '#6b7280';
       const borderColor = state.theme === 'dark' ? '#2a3a57' : '#e5e7eb';
       
-      root.innerHTML = `
+      if (state.view === 'lists') {
+        root.innerHTML = renderListsView(bgColor, cardBg, textColor, secondaryText, borderColor);
+      } else if (state.view === 'tasks') {
+        root.innerHTML = renderTasksView(bgColor, cardBg, textColor, secondaryText, borderColor);
+      }
+
+      attachDragListeners();
+    }
+
+    function renderListsView(bgColor, cardBg, textColor, secondaryText, borderColor) {
+      return `
+        <div style="flex: 1; display: flex; flex-direction: column; background-color: ${bgColor}; color: ${textColor}; animation: fadeIn 0.3s ease-out;">
+          <!-- Header -->
+          <div style="background: linear-gradient(135deg, #6366f1 0%, #6366f1dd 100%); padding: 2rem 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.08);">
+            <div style="display: flex; justify-content: space-between; align-items: center;">
+              <div>
+                <h1 style="font-size: 2rem; font-weight: 700; color: white; margin-bottom: 0.25rem;">Tasks</h1>
+                <p style="color: rgba(255,255,255,0.8); font-size: 0.9rem;">Choose a list</p>
+              </div>
+              <button onclick="toggleTheme()" style="background: rgba(255,255,255,0.2); border: none; color: white; width: 2.5rem; height: 2.5rem; border-radius: 0.75rem; font-size: 1.2rem; cursor: pointer; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
+                ${state.theme === 'light' ? '🌙' : '☀️'}
+              </button>
+            </div>
+          </div>
+
+          <!-- Lists -->
+          <div style="flex: 1; overflow-y: auto; padding: 1.25rem;">
+            <div style="display: flex; flex-direction: column; gap: 1rem;">
+              ${state.lists.map((list, idx) => {
+                const itemCount = state.items.filter(i => i.listId === list.id && !i.completed).length;
+                const completedCount = state.items.filter(i => i.listId === list.id && i.completed).length;
+                return `
+                  <button onclick="openList(${list.id})"
+                    oncontextmenu="openListMenu(${list.id}, event)"
+                    onmousedown="window.listTouchStart_${list.id} = Date.now()"
+                    onmouseup="if(Date.now() - window.listTouchStart_${list.id} > 500) openListMenu(${list.id}, event)"
+                    ontouchstart="window.listTouchStart_${list.id} = Date.now()"
+                    ontouchend="if(Date.now() - window.listTouchStart_${list.id} > 500) { state.listMenuModal = ${list.id}; state.editingListColor = '${list.color}'; render(); }"
+                    style="animation: slideIn 0.3s ease-out ${idx * 60}ms both; text-align: left; padding: 1.5rem; border: none; border-radius: 1rem; background: linear-gradient(135deg, ${list.color} 0%, ${list.color}dd 100%); color: white; cursor: pointer; transition: all 0.3s; box-shadow: 0 2px 8px rgba(0,0,0,0.1);"
+                    onmouseover="this.style.transform='translateY(-2px)'; this.style.boxShadow='0 8px 16px rgba(0,0,0,0.15)';"
+                    onmouseout="this.style.transform='translateY(0)'; this.style.boxShadow='0 2px 8px rgba(0,0,0,0.1)';">
+                    <div style="font-weight: 700; font-size: 1.1rem; margin-bottom: 0.5rem;">${list.name}</div>
+                    <div style="font-size: 0.85rem; opacity: 0.9;">${itemCount} tasks ${completedCount > 0 ? '· ' + completedCount + ' done' : ''}</div>
+                  </button>
+                `;
+              }).join('')}
+              
+              <!-- Create list button -->
+              <button onclick="setState({showNewListForm: true})"
+                style="animation: slideIn 0.3s ease-out ${state.lists.length * 60}ms both; text-align: left; padding: 1.5rem; border: 2px dashed ${borderColor}; border-radius: 1rem; background: ${cardBg}; color: ${textColor}; cursor: pointer; transition: all 0.3s;">
+                <div style="font-weight: 600; font-size: 1rem;">➕ Create List</div>
+              </button>
+            </div>
+          </div>
+        </div>
+
+        ${state.showNewListForm ? renderNewListModal(cardBg, textColor, borderColor) : ''}
+        ${state.listMenuModal ? renderListMenuModal(cardBg, textColor, borderColor) : ''}
+      `;
+    }
+
+    function renderTasksView(bgColor, cardBg, textColor, secondaryText, borderColor) {
+      const activeListObj = state.lists.find(l => l.id === state.activeList);
+      const activeItems = state.activeList !== null ? getListItems() : [];
+      const completedCount = activeItems.filter(i => i.completed).length;
+      
+      return `
         <div style="flex: 1; display: flex; flex-direction: column; background-color: ${bgColor}; color: ${textColor}; animation: fadeIn 0.3s ease-out;">
           <!-- Header -->
           <div style="background: linear-gradient(135deg, ${activeListObj?.color || '#6366f1'} 0%, ${activeListObj?.color || '#6366f1'}dd 100%); padding: 2rem 1.5rem 1.5rem; box-shadow: 0 2px 8px rgba(0,0,0,0.08); border-radius: 0 0 1.5rem 1.5rem;">
             <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 1.5rem;">
-              <div>
-                <h1 style="font-size: 2rem; font-weight: 700; color: white; margin-bottom: 0.25rem;">Tasks</h1>
-                <p style="color: rgba(255,255,255,0.8); font-size: 0.9rem;">${activeListObj?.name || 'Select a list'}</p>
+              <div style="flex: 1;">
+                <button onclick="setState({view: 'lists'})" style="background: rgba(255,255,255,0.2); border: none; color: white; padding: 0.5rem 1rem; border-radius: 0.75rem; font-size: 1rem; cursor: pointer; margin-bottom: 1rem; transition: all 0.3s;">
+                  ← Back
+                </button>
+                <h1 style="font-size: 2rem; font-weight: 700; color: white; margin-bottom: 0.25rem;">${activeListObj?.name || 'Tasks'}</h1>
               </div>
               <button onclick="toggleTheme()" style="background: rgba(255,255,255,0.2); border: none; color: white; width: 2.5rem; height: 2.5rem; border-radius: 0.75rem; font-size: 1.2rem; cursor: pointer; transition: all 0.3s; display: flex; align-items: center; justify-content: center;">
                 ${state.theme === 'light' ? '🌙' : '☀️'}
               </button>
             </div>
 
-            <!-- List tabs -->
-            <div style="display: flex; gap: 0.75rem; overflow-x: auto; padding-bottom: 0.5rem; scroll-behavior: smooth; align-items: center;">
-              ${state.lists.map((list, idx) => {
-                let touchStartTime = 0;
-                return `
-                  <button 
-                    onclick="setActiveList(${list.id})"
-                    oncontextmenu="openListMenu(${list.id}, event)"
-                    onmousedown="window.listTouchStart_${list.id} = Date.now()"
-                    onmouseup="if(Date.now() - window.listTouchStart_${list.id} > 500) openListMenu(${list.id}, event)"
-                    ontouchstart="window.listTouchStart_${list.id} = Date.now()"
-                    ontouchend="if(Date.now() - window.listTouchStart_${list.id} > 500) { state.listMenuModal = ${list.id}; state.editingListColor = '${list.color}'; render(); }"
-                    style="animation: slideIn 0.3s ease-out ${idx * 40}ms both; padding: 0.625rem 1rem; border-radius: 0.75rem; border: none; font-size: 0.9rem; font-weight: 500; white-space: nowrap; cursor: pointer; background: ${state.activeList === list.id ? 'white' : 'rgba(255,255,255,0.25)'}; color: ${state.activeList === list.id ? list.color : 'white'}; transition: all 0.3s;">
-                    ${list.name}
-                  </button>
-                `;
-              }).join('')}
-              <button onclick="setState({showNewListForm: true})" 
-                style="animation: slideIn 0.3s ease-out 600ms both; padding: 0.625rem 0.75rem; border-radius: 0.75rem; border: none; font-size: 1.1rem; font-weight: 500; white-space: nowrap; cursor: pointer; background: rgba(255,255,255,0.25); color: white; transition: all 0.3s; display: flex; align-items: center; justify-content: center; min-width: 2.5rem;">
-                ➕
-              </button>
-            </div>
-
             <!-- Progress -->
-            ${state.activeList !== null ? `
+            ${activeItems.length > 0 ? `
               <div style="margin-top: 1rem;">
                 <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.5rem; font-size: 0.85rem;">
                   <span style="color: rgba(255,255,255,0.95);">${completedCount} of ${activeItems.length} done</span>
                   <span style="color: rgba(255,255,255,0.7);">${activeItems.length > 0 ? Math.round((completedCount / activeItems.length) * 100) : 0}%</span>
                 </div>
-                ${activeItems.length > 0 ? `
-                  <div style="background: rgba(255,255,255,0.25); border-radius: 9999px; height: 6px; overflow: hidden;">
-                    <div style="background: white; height: 6px; border-radius: 9999px; width: ${(completedCount / activeItems.length) * 100}%; transition: width 0.5s ease-out;"></div>
-                  </div>
-                ` : ''}
+                <div style="background: rgba(255,255,255,0.25); border-radius: 9999px; height: 6px; overflow: hidden;">
+                  <div style="background: white; height: 6px; border-radius: 9999px; width: ${(completedCount / activeItems.length) * 100}%; transition: width 0.5s ease-out;"></div>
+                </div>
               </div>
             ` : ''}
           </div>
 
           <!-- Controls -->
           <div style="padding: 1.25rem; border-bottom: 1px solid ${borderColor}; background: ${bgColor};">
-            <div style="display: flex; gap: 0.75rem; margin-bottom: 1rem;">
-              <button onclick="setState({view: 'list'})" 
-                style="flex: 1; padding: 0.75rem; border-radius: 0.75rem; border: none; background: ${state.view === 'list' ? '#6366f1' : cardBg}; color: ${state.view === 'list' ? 'white' : textColor}; font-weight: 600; cursor: pointer; transition: all 0.3s;">
-                ☰ List
-              </button>
-              <button onclick="setState({view: 'calendar'})" 
-                style="flex: 1; padding: 0.75rem; border-radius: 0.75rem; border: none; background: ${state.view === 'calendar' ? '#6366f1' : cardBg}; color: ${state.view === 'calendar' ? 'white' : textColor}; font-weight: 600; cursor: pointer; transition: all 0.3s;">
-                📅 Calendar
-              </button>
-            </div>
-
             <div style="position: relative; margin-bottom: 1rem;">
               <input type="text" placeholder="Search tasks..." value="${state.search}" oninput="setState({search: this.value})"
                 style="width: 100%; padding: 0.75rem 1rem; padding-left: 2.5rem; border-radius: 0.75rem; border: 1px solid ${borderColor}; background: ${cardBg}; color: ${textColor}; font-size: 0.95rem;" />
@@ -422,153 +414,83 @@
               style="width: 100%; padding: 0.75rem; border-radius: 0.75rem; border: 1px solid ${borderColor}; background: ${cardBg}; color: ${textColor}; font-size: 0.95rem; cursor: pointer;">
               <option value="manual">Manual order (drag to reorder)</option>
               <option value="alphabetical">Alphabetical</option>
-              <option value="duedate">Due date</option>
               <option value="priority">Priority</option>
             </select>
           </div>
 
           <!-- Main content -->
           <div style="flex: 1; overflow-y: auto; padding: 1.25rem;">
-            ${state.activeList !== null ? (state.view === 'list' ? renderListView(activeItems, cardBg, textColor, borderColor, secondaryText) : renderCalendarView(cardBg, textColor, borderColor)) : renderEmptyState(textColor, secondaryText)}
+            <!-- Add item button/form -->
+            <div style="background: ${cardBg}; border: 1px solid ${borderColor}; padding: 1.5rem; border-radius: 1rem; margin-bottom: 1.5rem; animation: slideIn 0.3s ease-out; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
+              ${!state.showAddForm ? `
+                <button onclick="setState({showAddForm: true}); setTimeout(() => document.getElementById('itemTitle')?.focus(), 100);" 
+                  style="width: 100%; padding: 1rem; background: #6366f1; color: white; border: none; border-radius: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.3s; font-size: 1rem;">
+                  ➕ Add
+                </button>
+              ` : `
+                <div style="display: flex; flex-direction: column; gap: 1rem;">
+                  <input type="text" id="itemTitle" placeholder="Add a new task..." 
+                    style="width: 100%; padding: 0.875rem; border-radius: 0.75rem; border: 1px solid ${borderColor}; background: ${textColor === '#ffffff' ? '#111827' : 'white'}; color: ${textColor}; font-size: 1rem;" 
+                    onkeypress="if(event.key==='Enter') addItemFromForm()" />
+                  <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 0.75rem;">
+                    <select id="itemPriority" 
+                      style="padding: 0.75rem; border-radius: 0.75rem; border: 1px solid ${borderColor}; background: ${textColor === '#ffffff' ? '#111827' : 'white'}; color: ${textColor}; font-size: 0.9rem; cursor: pointer;">
+                      <option value="low">Low</option>
+                      <option value="medium" selected>Medium</option>
+                      <option value="high">High</option>
+                    </select>
+                    <button onclick="addItemFromForm()" style="padding: 0.75rem; background: #6366f1; color: white; border: none; border-radius: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.3s;">Add</button>
+                  </div>
+                  <button onclick="setState({showAddForm: false})" 
+                    style="padding: 0.75rem; background: none; border: 1px solid ${borderColor}; border-radius: 0.75rem; color: ${secondaryText}; font-weight: 600; cursor: pointer; transition: all 0.3s;">
+                    Cancel
+                  </button>
+                </div>
+              `}
+            </div>
+
+            <!-- Items -->
+            <div style="display: flex; flex-direction: column; gap: 0.875rem;" id="itemsList">
+              ${activeItems.length === 0 ? `
+                <div style="text-align: center; padding: 3rem 1rem; color: ${secondaryText};">
+                  <div style="font-size: 2.5rem; margin-bottom: 0.75rem;">✨</div>
+                  <p style="font-weight: 600; font-size: 1.05rem;">No tasks yet</p>
+                  <p style="font-size: 0.9rem; margin-top: 0.5rem;">Create one to get started</p>
+                </div>
+              ` : activeItems.map((item, idx) => `
+                <div draggable="${state.sortBy === 'manual' ? 'true' : 'false'}" data-item-id="${item.id}" style="animation: slideIn 0.3s ease-out ${idx * 30}ms both; background: ${cardBg}; border: 2px solid ${borderColor}; padding: 1.25rem; border-radius: 0.875rem; display: flex; gap: 1rem; align-items: flex-start; opacity: ${item.completed ? 0.5 : 1}; box-shadow: 0 1px 2px rgba(0,0,0,0.04); transition: all 0.2s; cursor: ${state.sortBy === 'manual' ? 'grab' : 'default'};">
+                  <input type="checkbox" ${item.completed ? 'checked' : ''} onchange="toggleItem(${item.id})"
+                    style="margin-top: 0.25rem; width: 1.25rem; height: 1.25rem; cursor: pointer; accent-color: #6366f1;" />
+                  <div style="flex: 1; min-width: 0;">
+                    <p style="font-weight: 600; font-size: 0.95rem; text-decoration: ${item.completed ? 'line-through' : 'none'}; color: ${item.completed ? secondaryText : textColor}; margin-bottom: 0.75rem; line-height: 1.4;">
+                      ${item.title}
+                    </p>
+                    <span style="font-size: 0.8rem; padding: 0.375rem 0.75rem; border-radius: 0.5rem; font-weight: 500; background: ${item.priority === 'high' ? '#fee2e2' : item.priority === 'medium' ? '#fef3c7' : '#dbeafe'}; color: ${item.priority === 'high' ? '#991b1b' : item.priority === 'medium' ? '#92400e' : '#1e40af'}; display: inline-block;">
+                      ${item.priority === 'high' ? '🔴' : item.priority === 'medium' ? '🟡' : '🟢'} ${item.priority}
+                    </span>
+                  </div>
+                  <div style="display: flex; gap: 0.5rem;">
+                    <button onclick="openEditModal(${item.id})" style="background: none; border: none; color: ${secondaryText}; cursor: pointer; font-size: 1rem; padding: 0.5rem; transition: all 0.2s;">✏️</button>
+                    <button onclick="moveItem(${item.id}, null)" style="background: none; border: none; color: ${secondaryText}; cursor: pointer; font-size: 1rem; padding: 0.5rem; transition: all 0.2s;">↔️</button>
+                    <button onclick="deleteItem(${item.id})" style="background: none; border: none; color: ${secondaryText}; cursor: pointer; font-size: 1rem; padding: 0.5rem; transition: all 0.2s;">🗑</button>
+                  </div>
+                </div>
+              `).join('')}
+            </div>
+
+            ${activeItems.some(i => i.completed) ? `
+              <div style="margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid ${borderColor};">
+                <button onclick="bulkDeleteCompleted()" style="width: 100%; padding: 0.875rem; background: none; border: none; color: #dc2626; font-weight: 600; cursor: pointer; transition: all 0.3s; font-size: 0.95rem;">
+                  🗑 Delete completed tasks
+                </button>
+              </div>
+            ` : ''}
           </div>
         </div>
 
         ${state.moveToModal ? renderMoveModal(cardBg, textColor, borderColor) : ''}
-        ${state.showNewListForm ? renderNewListModal(cardBg, textColor, borderColor) : ''}
         ${state.editingItem ? renderEditModal(cardBg, textColor, borderColor) : ''}
         ${state.listMenuModal ? renderListMenuModal(cardBg, textColor, borderColor) : ''}
-      `;
-
-      attachDragListeners();
-    }
-
-    function renderListView(activeItems, cardBg, textColor, borderColor, secondaryText) {
-      return `
-        <!-- Add item button/form -->
-        <div style="background: ${cardBg}; border: 1px solid ${borderColor}; padding: 1.5rem; border-radius: 1rem; margin-bottom: 1.5rem; animation: slideIn 0.3s ease-out; box-shadow: 0 1px 3px rgba(0,0,0,0.05);">
-          ${!state.showAddForm ? `
-            <button onclick="setState({showAddForm: true}); setTimeout(() => document.getElementById('itemTitle')?.focus(), 100);" 
-              style="width: 100%; padding: 1rem; background: #6366f1; color: white; border: none; border-radius: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.3s; font-size: 1rem;">
-              ➕ Add
-            </button>
-          ` : `
-            <div style="display: flex; flex-direction: column; gap: 1rem;">
-              <input type="text" id="itemTitle" placeholder="Add a new task..." 
-                style="width: 100%; padding: 0.875rem; border-radius: 0.75rem; border: 1px solid ${borderColor}; background: ${textColor === '#ffffff' ? '#111827' : 'white'}; color: ${textColor}; font-size: 1rem;" 
-                onkeypress="if(event.key==='Enter') addItemFromForm()" />
-              <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 0.75rem;">
-                <input type="date" id="itemDueDate" 
-                  style="padding: 0.75rem; border-radius: 0.75rem; border: 1px solid ${borderColor}; background: ${textColor === '#ffffff' ? '#111827' : 'white'}; color: ${textColor}; font-size: 0.9rem;" />
-                <select id="itemPriority" 
-                  style="padding: 0.75rem; border-radius: 0.75rem; border: 1px solid ${borderColor}; background: ${textColor === '#ffffff' ? '#111827' : 'white'}; color: ${textColor}; font-size: 0.9rem; cursor: pointer;">
-                  <option value="low">Low</option>
-                  <option value="medium" selected>Medium</option>
-                  <option value="high">High</option>
-                </select>
-                <button onclick="addItemFromForm()" style="padding: 0.75rem; background: #6366f1; color: white; border: none; border-radius: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.3s;">Add</button>
-              </div>
-              <button onclick="setState({showAddForm: false})" 
-                style="padding: 0.75rem; background: none; border: 1px solid ${borderColor}; border-radius: 0.75rem; color: ${secondaryText}; font-weight: 600; cursor: pointer; transition: all 0.3s;">
-                Cancel
-              </button>
-            </div>
-          `}
-        </div>
-
-        <!-- Items -->
-        <div style="display: flex; flex-direction: column; gap: 0.875rem;" id="itemsList">
-          ${activeItems.length === 0 ? `
-            <div style="text-align: center; padding: 3rem 1rem; color: ${secondaryText};">
-              <div style="font-size: 2.5rem; margin-bottom: 0.75rem;">✨</div>
-              <p style="font-weight: 600; font-size: 1.05rem;">No tasks yet</p>
-              <p style="font-size: 0.9rem; margin-top: 0.5rem;">Create one to get started</p>
-            </div>
-          ` : activeItems.map((item, idx) => {
-            const dueDate = item.dueDate ? new Date(item.dueDate) : null;
-            const isOverdue = dueDate && dueDate < new Date() && !item.completed;
-            return `
-              <div draggable="${state.sortBy === 'manual' ? 'true' : 'false'}" data-item-id="${item.id}" style="animation: slideIn 0.3s ease-out ${idx * 30}ms both; background: ${cardBg}; border: 2px solid ${borderColor}; padding: 1.25rem; border-radius: 0.875rem; display: flex; gap: 1rem; align-items: flex-start; opacity: ${item.completed ? 0.5 : 1}; box-shadow: 0 1px 2px rgba(0,0,0,0.04); transition: all 0.2s; cursor: ${state.sortBy === 'manual' ? 'grab' : 'default'};">
-                <input type="checkbox" ${item.completed ? 'checked' : ''} onchange="toggleItem(${item.id})"
-                  style="margin-top: 0.25rem; width: 1.25rem; height: 1.25rem; cursor: pointer; accent-color: #6366f1;" />
-                <div style="flex: 1; min-width: 0;">
-                  <p style="font-weight: 600; font-size: 0.95rem; text-decoration: ${item.completed ? 'line-through' : 'none'}; color: ${item.completed ? secondaryText : textColor}; margin-bottom: 0.75rem; line-height: 1.4;">
-                    ${item.title}
-                  </p>
-                  <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                    ${item.dueDate ? `
-                      <span style="font-size: 0.8rem; padding: 0.375rem 0.75rem; border-radius: 0.5rem; font-weight: 500; background: ${isOverdue ? '#fee2e2' : '#e0e7ff'}; color: ${isOverdue ? '#991b1b' : '#3730a3'};">
-                        📅 ${dueDate.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}
-                      </span>
-                    ` : ''}
-                    <span style="font-size: 0.8rem; padding: 0.375rem 0.75rem; border-radius: 0.5rem; font-weight: 500; background: ${item.priority === 'high' ? '#fee2e2' : item.priority === 'medium' ? '#fef3c7' : '#dbeafe'}; color: ${item.priority === 'high' ? '#991b1b' : item.priority === 'medium' ? '#92400e' : '#1e40af'};">
-                      ${item.priority === 'high' ? '🔴' : item.priority === 'medium' ? '🟡' : '🟢'} ${item.priority}
-                    </span>
-                  </div>
-                </div>
-                <div style="display: flex; gap: 0.5rem;">
-                  <button onclick="openEditModal(${item.id})" style="background: none; border: none; color: ${secondaryText}; cursor: pointer; font-size: 1rem; padding: 0.5rem; transition: all 0.2s;">✏️</button>
-                  <button onclick="openMoveModal(${item.id})" style="background: none; border: none; color: ${secondaryText}; cursor: pointer; font-size: 1rem; padding: 0.5rem; transition: all 0.2s;">↔️</button>
-                  <button onclick="deleteItem(${item.id})" style="background: none; border: none; color: ${secondaryText}; cursor: pointer; font-size: 1rem; padding: 0.5rem; transition: all 0.2s;">🗑</button>
-                </div>
-              </div>
-            `;
-          }).join('')}
-        </div>
-
-        ${activeItems.some(i => i.completed) ? `
-          <div style="margin-top: 2rem; padding-top: 1.5rem; border-top: 1px solid ${borderColor};">
-            <button onclick="bulkDeleteCompleted()" style="width: 100%; padding: 0.875rem; background: none; border: none; color: #dc2626; font-weight: 600; cursor: pointer; transition: all 0.3s; font-size: 0.95rem;">
-              🗑 Delete completed tasks
-            </button>
-          </div>
-        ` : ''}
-      `;
-    }
-
-    function renderCalendarView(cardBg, textColor, borderColor) {
-      const daysInMonth = getDaysInMonth(state.currentMonth);
-      const firstDay = getFirstDayOfMonth(state.currentMonth);
-      
-      return `
-        <div>
-          <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-            <button onclick="setMonth(-1)" style="padding: 0.5rem 1rem; background: ${cardBg}; border: 1px solid ${borderColor}; border-radius: 0.75rem; cursor: pointer; color: ${textColor};">← Prev</button>
-            <h2 style="font-weight: 700; font-size: 1.2rem; letter-spacing: -0.5px;">
-              ${state.currentMonth.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })}
-            </h2>
-            <button onclick="setMonth(1)" style="padding: 0.5rem 1rem; background: ${cardBg}; border: 1px solid ${borderColor}; border-radius: 0.75rem; cursor: pointer; color: ${textColor};">Next →</button>
-          </div>
-
-          <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.5rem; margin-bottom: 1rem;">
-            ${['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => `
-              <div style="text-align: center; font-weight: 700; font-size: 0.85rem; padding: 0.75rem 0; color: ${textColor}; opacity: 0.6; text-transform: uppercase; letter-spacing: 0.05em;">
-                ${day}
-              </div>
-            `).join('')}
-          </div>
-
-          <div style="display: grid; grid-template-columns: repeat(7, 1fr); gap: 0.75rem;">
-            ${Array(firstDay).fill(0).map(() => `<div style="padding: 0.5rem; border-radius: 0.75rem; background: ${cardBg};"></div>`).join('')}
-            ${Array(daysInMonth).fill(0).map((_, i) => {
-              const date = new Date(state.currentMonth.getFullYear(), state.currentMonth.getMonth(), i + 1);
-              const itemsForDay = getItemsForDate(date);
-              const isToday = new Date().toDateString() === date.toDateString();
-              return `
-                <div style="padding: 1rem; border-radius: 0.875rem; border: 2px solid ${isToday ? '#6366f1' : borderColor}; background: ${isToday ? 'rgba(99, 102, 241, 0.1)' : cardBg}; transition: all 0.2s;">
-                  <div style="font-weight: 700; margin-bottom: 0.5rem; color: ${isToday ? '#6366f1' : textColor};">${i + 1}</div>
-                  <div style="display: flex; flex-direction: column; gap: 0.375rem;">
-                    ${itemsForDay.slice(0, 2).map(item => `
-                      <div style="font-size: 0.75rem; padding: 0.25rem 0.5rem; border-radius: 0.375rem; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; background: #e0e7ff; color: #3730a3; font-weight: 500; text-decoration: ${item.completed ? 'line-through' : 'none'};">
-                        ${item.title}
-                      </div>
-                    `).join('')}
-                    ${itemsForDay.length > 2 ? `<div style="font-size: 0.75rem; padding: 0.25rem 0.5rem; font-weight: 600; color: ${textColor}; opacity: 0.6;">+${itemsForDay.length - 2}</div>` : ''}
-                  </div>
-                </div>
-              `;
-            }).join('')}
-          </div>
-        </div>
       `;
     }
 
@@ -591,6 +513,36 @@
               style="width: 100%; padding: 0.875rem; background: none; border: 1px solid ${borderColor}; border-radius: 0.75rem; cursor: pointer; color: ${textColor}; font-weight: 600;">
               Cancel
             </button>
+          </div>
+        </div>
+      `;
+    }
+
+    function renderEditModal(cardBg, textColor, borderColor) {
+      const item = state.items.find(i => i.id === state.editingItem);
+      if (!item) return '';
+      
+      return `
+        <div class="modal">
+          <div class="modal-content">
+            <h2 style="font-weight: 700; margin-bottom: 1.5rem; font-size: 1.2rem;">Edit Task</h2>
+            <div style="display: flex; flex-direction: column; gap: 1rem;">
+              <input type="text" id="editItemTitle" placeholder="Task title..." value="${item.title}"
+                style="width: 100%; padding: 0.875rem; border-radius: 0.75rem; border: 1px solid ${borderColor}; background: ${textColor === '#ffffff' ? '#111827' : 'white'}; color: ${textColor}; font-size: 1rem;" 
+                onkeypress="if(event.key==='Enter') editItemFromForm()" />
+              
+              <select id="editItemPriority"
+                style="width: 100%; padding: 0.875rem; border-radius: 0.75rem; border: 1px solid ${borderColor}; background: ${textColor === '#ffffff' ? '#111827' : 'white'}; color: ${textColor}; font-size: 0.95rem; cursor: pointer;">
+                <option value="low" ${item.priority === 'low' ? 'selected' : ''}>Low</option>
+                <option value="medium" ${item.priority === 'medium' ? 'selected' : ''}>Medium</option>
+                <option value="high" ${item.priority === 'high' ? 'selected' : ''}>High</option>
+              </select>
+
+              <div style="display: flex; gap: 0.75rem;">
+                <button onclick="editItemFromForm()" style="flex: 1; padding: 0.875rem; background: #6366f1; color: white; border: none; border-radius: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.3s;">Save</button>
+                <button onclick="setState({editingItem: null})" style="flex: 1; padding: 0.875rem; background: none; border: 1px solid ${borderColor}; border-radius: 0.75rem; color: ${textColor}; font-weight: 600; cursor: pointer; transition: all 0.3s;">Cancel</button>
+              </div>
+            </div>
           </div>
         </div>
       `;
@@ -621,39 +573,6 @@
               <div style="display: flex; gap: 0.75rem;">
                 <button onclick="addListFromForm()" style="flex: 1; padding: 0.875rem; background: #6366f1; color: white; border: none; border-radius: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.3s;">Create</button>
                 <button onclick="setState({showNewListForm: false})" style="flex: 1; padding: 0.875rem; background: none; border: 1px solid ${borderColor}; border-radius: 0.75rem; color: ${textColor}; font-weight: 600; cursor: pointer; transition: all 0.3s;">Cancel</button>
-              </div>
-            </div>
-          </div>
-        </div>
-      `;
-    }
-
-    function renderEditModal(cardBg, textColor, borderColor) {
-      const item = state.items.find(i => i.id === state.editingItem);
-      if (!item) return '';
-      
-      return `
-        <div class="modal">
-          <div class="modal-content">
-            <h2 style="font-weight: 700; margin-bottom: 1.5rem; font-size: 1.2rem;">Edit Task</h2>
-            <div style="display: flex; flex-direction: column; gap: 1rem;">
-              <input type="text" id="editItemTitle" placeholder="Task title..." value="${item.title}"
-                style="width: 100%; padding: 0.875rem; border-radius: 0.75rem; border: 1px solid ${borderColor}; background: ${textColor === '#ffffff' ? '#111827' : 'white'}; color: ${textColor}; font-size: 1rem;" 
-                onkeypress="if(event.key==='Enter') editItemFromForm()" />
-              
-              <input type="date" id="editItemDueDate" value="${item.dueDate}"
-                style="width: 100%; padding: 0.875rem; border-radius: 0.75rem; border: 1px solid ${borderColor}; background: ${textColor === '#ffffff' ? '#111827' : 'white'}; color: ${textColor}; font-size: 0.95rem;" />
-              
-              <select id="editItemPriority"
-                style="width: 100%; padding: 0.875rem; border-radius: 0.75rem; border: 1px solid ${borderColor}; background: ${textColor === '#ffffff' ? '#111827' : 'white'}; color: ${textColor}; font-size: 0.95rem; cursor: pointer;">
-                <option value="low" ${item.priority === 'low' ? 'selected' : ''}>Low</option>
-                <option value="medium" ${item.priority === 'medium' ? 'selected' : ''}>Medium</option>
-                <option value="high" ${item.priority === 'high' ? 'selected' : ''}>High</option>
-              </select>
-
-              <div style="display: flex; gap: 0.75rem;">
-                <button onclick="editItemFromForm()" style="flex: 1; padding: 0.875rem; background: #6366f1; color: white; border: none; border-radius: 0.75rem; font-weight: 600; cursor: pointer; transition: all 0.3s;">Save</button>
-                <button onclick="setState({editingItem: null})" style="flex: 1; padding: 0.875rem; background: none; border: 1px solid ${borderColor}; border-radius: 0.75rem; color: ${textColor}; font-weight: 600; cursor: pointer; transition: all 0.3s;">Cancel</button>
               </div>
             </div>
           </div>
@@ -700,29 +619,19 @@
       `;
     }
 
-    function renderEmptyState(textColor, secondaryText) {
-      return `
-        <div style="text-align: center; padding: 4rem 1rem; color: ${secondaryText};">
-          <div style="font-size: 3rem; margin-bottom: 1rem;">📝</div>
-          <p style="font-weight: 700; font-size: 1.15rem; color: ${textColor}; margin-bottom: 0.5rem;">Create a list to get started</p>
-          <p style="font-size: 0.95rem;">All your days are ready to go!</p>
-        </div>
-      `;
-    }
-
     function attachDragListeners() {
-      if (state.sortBy !== 'manual') return;
+      if (state.sortBy !== 'manual' || state.view !== 'tasks') return;
 
       const items = document.querySelectorAll('[data-item-id]');
       items.forEach(item => {
         item.addEventListener('dragstart', (e) => {
-          state.draggedItem = parseInt(e.target.closest('[data-item-id]').dataset.itemId);
-          e.target.closest('[data-item-id]').classList.add('dragging');
+          state.draggedItem = parseInt(e.currentTarget.dataset.itemId);
+          e.currentTarget.classList.add('dragging');
           e.dataTransfer.effectAllowed = 'move';
         });
 
         item.addEventListener('dragend', (e) => {
-          e.target.closest('[data-item-id]').classList.remove('dragging');
+          e.currentTarget.classList.remove('dragging');
           state.draggedItem = null;
         });
 
@@ -730,24 +639,24 @@
           e.preventDefault();
           e.dataTransfer.dropEffect = 'move';
           if (state.draggedItem) {
-            e.target.closest('[data-item-id]').classList.add('drag-over');
+            e.currentTarget.classList.add('drag-over');
           }
         });
 
         item.addEventListener('dragleave', (e) => {
-          e.target.closest('[data-item-id]').classList.remove('drag-over');
+          e.currentTarget.classList.remove('drag-over');
         });
 
         item.addEventListener('drop', (e) => {
           e.preventDefault();
-          e.target.closest('[data-item-id]').classList.remove('drag-over');
+          e.currentTarget.classList.remove('drag-over');
           
           if (state.draggedItem) {
-            const draggedIdx = state.items.findIndex(i => i.id === state.draggedItem && i.listId === state.activeList);
-            const droppedIdx = state.items.findIndex(i => i.id === parseInt(e.target.closest('[data-item-id]').dataset.itemId) && i.listId === state.activeList);
+            const draggedItem = state.items.find(i => i.id === state.draggedItem);
+            const droppedItem = state.items.find(i => i.id === parseInt(e.currentTarget.dataset.itemId));
             
-            if (draggedIdx !== -1 && droppedIdx !== -1 && draggedIdx !== droppedIdx) {
-              [state.items[draggedIdx].order, state.items[droppedIdx].order] = [state.items[droppedIdx].order, state.items[draggedIdx].order];
+            if (draggedItem && droppedItem && draggedItem.listId === droppedItem.listId) {
+              [draggedItem.order, droppedItem.order] = [droppedItem.order, draggedItem.order];
               saveState();
               render();
             }
@@ -762,30 +671,35 @@
       render();
     }
 
-    function setActiveList(id) {
+    function openList(id) {
       state.activeList = id;
+      state.view = 'tasks';
       state.search = '';
       state.showAddForm = false;
-      state.editingItem = null;
-      state.listMenuModal = null;
-      saveState();
       render();
     }
 
-    function setMonth(offset) {
-      state.currentMonth = new Date(state.currentMonth.getFullYear(), state.currentMonth.getMonth() + offset);
+    function openListMenu(id, event) {
+      event.preventDefault();
+      state.listMenuModal = id;
+      state.editingListColor = state.lists.find(l => l.id === id)?.color;
       render();
+    }
+
+    function changeListColor(listId, color) {
+      const list = state.lists.find(l => l.id === listId);
+      if (list) {
+        list.color = color;
+        state.editingListColor = color;
+        saveState();
+        render();
+      }
     }
 
     function toggleTheme() {
       state.theme = state.theme === 'light' ? 'dark' : 'light';
       applyTheme();
       saveState();
-      render();
-    }
-
-    function openMoveModal(itemId) {
-      state.moveToModal = itemId;
       render();
     }
 
@@ -796,13 +710,19 @@
 
     function addItemFromForm() {
       const title = document.getElementById('itemTitle');
-      const dueDate = document.getElementById('itemDueDate');
       const priority = document.getElementById('itemPriority');
       if (title && title.value.trim()) {
-        addItem(title.value.trim(), dueDate?.value || '', priority?.value || 'medium');
+        addItem(title.value.trim(), priority?.value || 'medium');
         title.value = '';
-        dueDate.value = '';
         priority.value = 'medium';
+      }
+    }
+
+    function editItemFromForm() {
+      const title = document.getElementById('editItemTitle');
+      const priority = document.getElementById('editItemPriority');
+      if (title && title.value.trim()) {
+        editItem(state.editingItem, title.value.trim(), priority?.value || 'medium');
       }
     }
 
@@ -811,15 +731,6 @@
       const color = state.selectedListColor || '#6366f1';
       if (name && name.value.trim()) {
         addList(name.value.trim(), color);
-      }
-    }
-
-    function editItemFromForm() {
-      const title = document.getElementById('editItemTitle');
-      const dueDate = document.getElementById('editItemDueDate');
-      const priority = document.getElementById('editItemPriority');
-      if (title && title.value.trim()) {
-        editItem(state.editingItem, title.value.trim(), dueDate?.value || '', priority?.value || 'medium');
       }
     }
 
