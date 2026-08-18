@@ -119,7 +119,6 @@
       search: '',
       sortBy: 'manual',
       showNewListForm: false,
-      draggedItem: null,
       moveToModal: null,
       showAddForm: false,
       editingItem: null,
@@ -278,6 +277,40 @@
       }
     }
 
+    function moveItemUp(itemId) {
+      const item = state.items.find(i => i.id === itemId && i.listId === state.activeList);
+      if (!item) return;
+      
+      const listItems = state.items.filter(i => i.listId === state.activeList).sort((a, b) => a.order - b.order);
+      const currentIndex = listItems.findIndex(i => i.id === itemId);
+      
+      if (currentIndex > 0) {
+        const itemAbove = listItems[currentIndex - 1];
+        const temp = item.order;
+        item.order = itemAbove.order;
+        itemAbove.order = temp;
+        saveState();
+        render();
+      }
+    }
+
+    function moveItemDown(itemId) {
+      const item = state.items.find(i => i.id === itemId && i.listId === state.activeList);
+      if (!item) return;
+      
+      const listItems = state.items.filter(i => i.listId === state.activeList).sort((a, b) => a.order - b.order);
+      const currentIndex = listItems.findIndex(i => i.id === itemId);
+      
+      if (currentIndex < listItems.length - 1) {
+        const itemBelow = listItems[currentIndex + 1];
+        const temp = item.order;
+        item.order = itemBelow.order;
+        itemBelow.order = temp;
+        saveState();
+        render();
+      }
+    }
+
     function bulkDeleteCompleted() {
       if (state.activeList !== null) {
         state.items = state.items.filter(i => !(i.listId === state.activeList && i.completed));
@@ -291,17 +324,24 @@
       if (state.search) {
         filtered = filtered.filter(i => i.title.toLowerCase().includes(state.search.toLowerCase()));
       }
-      switch(state.sortBy) {
-        case 'alphabetical':
-          filtered.sort((a, b) => a.title.localeCompare(b.title));
-          break;
-        case 'priority':
-          const order = { high: 0, medium: 1, low: 2 };
-          filtered.sort((a, b) => order[a.priority] - order[b.priority]);
-          break;
-        default:
-          filtered.sort((a, b) => a.order - b.order);
-      }
+      
+      // Always sort by completed status first (incomplete first), then by sort preference
+      filtered.sort((a, b) => {
+        if (a.completed !== b.completed) {
+          return a.completed ? 1 : -1;
+        }
+        
+        switch(state.sortBy) {
+          case 'alphabetical':
+            return a.title.localeCompare(b.title);
+          case 'priority':
+            const order = { high: 0, medium: 1, low: 2 };
+            return order[a.priority] - order[b.priority];
+          default:
+            return a.order - b.order;
+        }
+      });
+      
       return filtered;
     }
 
@@ -465,7 +505,7 @@
                   <p style="font-size: 0.9rem; margin-top: 0.5rem;">Create one to get started</p>
                 </div>
               ` : activeItems.map((item, idx) => `
-                <div draggable="${state.sortBy === 'manual' ? 'true' : 'false'}" data-item-id="${item.id}" style="animation: slideIn 0.3s ease-out ${idx * 30}ms both; background: ${cardBg}; border: 2px solid ${borderColor}; padding: 1.25rem; border-radius: 0.875rem; display: flex; gap: 1rem; align-items: flex-start; opacity: ${item.completed ? 0.5 : 1}; box-shadow: 0 1px 2px rgba(0,0,0,0.04); transition: all 0.2s; cursor: ${state.sortBy === 'manual' ? 'grab' : 'default'};">
+                <div data-item-id="${item.id}" style="animation: slideIn 0.3s ease-out ${idx * 30}ms both; background: ${cardBg}; border: 2px solid ${borderColor}; padding: 1.25rem; border-radius: 0.875rem; display: flex; gap: 1rem; align-items: flex-start; opacity: ${item.completed ? 0.5 : 1}; box-shadow: 0 1px 2px rgba(0,0,0,0.04); transition: all 0.2s;">
                   <input type="checkbox" ${item.completed ? 'checked' : ''} onchange="toggleItem(${item.id})"
                     style="margin-top: 0.25rem; width: 1.25rem; height: 1.25rem; cursor: pointer; accent-color: #6366f1;" />
                   <div style="flex: 1; min-width: 0;">
@@ -476,7 +516,13 @@
                       ${item.priority === 'high' ? '🔴' : item.priority === 'medium' ? '🟡' : '🟢'} ${item.priority}
                     </span>
                   </div>
-                  <div style="display: flex; gap: 0.5rem;">
+                  <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    ${state.sortBy === 'manual' ? `
+                      <div style="display: flex; gap: 0.25rem;">
+                        <button onclick="moveItemUp(${item.id})" style="background: none; border: none; color: ${secondaryText}; cursor: pointer; font-size: 1.2rem; padding: 0.25rem 0.5rem; transition: all 0.2s;">⬆️</button>
+                        <button onclick="moveItemDown(${item.id})" style="background: none; border: none; color: ${secondaryText}; cursor: pointer; font-size: 1.2rem; padding: 0.25rem 0.5rem; transition: all 0.2s;">⬇️</button>
+                      </div>
+                    ` : ''}
                     <button onclick="openEditModal(${item.id})" style="background: none; border: none; color: ${secondaryText}; cursor: pointer; font-size: 1rem; padding: 0.5rem; transition: all 0.2s;">✏️</button>
                     <button onclick="openMoveModal(${item.id})" style="background: none; border: none; color: ${secondaryText}; cursor: pointer; font-size: 1rem; padding: 0.5rem; transition: all 0.2s;">↔️</button>
                     <button onclick="deleteItem(${item.id})" style="background: none; border: none; color: ${secondaryText}; cursor: pointer; font-size: 1rem; padding: 0.5rem; transition: all 0.2s;">🗑</button>
@@ -626,137 +672,9 @@
       `;
     }
 
-    let touchState = {
-      dragging: false,
-      startY: 0,
-      draggedElement: null,
-      draggedItemId: null
-    };
-
     function attachDragListeners() {
-      if (state.sortBy !== 'manual' || state.view !== 'tasks') return;
-
-      const items = document.querySelectorAll('[data-item-id]');
-      
-      items.forEach(item => {
-        // Desktop drag
-        item.addEventListener('dragstart', (e) => {
-          const itemId = parseInt(e.currentTarget.dataset.itemId);
-          state.draggedItem = itemId;
-          e.currentTarget.classList.add('dragging');
-          e.dataTransfer.effectAllowed = 'move';
-        }, false);
-
-        item.addEventListener('dragend', (e) => {
-          e.currentTarget.classList.remove('dragging');
-          items.forEach(el => el.classList.remove('drag-over'));
-          state.draggedItem = null;
-        }, false);
-
-        item.addEventListener('dragover', (e) => {
-          e.preventDefault();
-          e.dataTransfer.dropEffect = 'move';
-        }, false);
-
-        item.addEventListener('dragenter', (e) => {
-          if (state.draggedItem && e.currentTarget.dataset.itemId) {
-            e.currentTarget.classList.add('drag-over');
-          }
-        }, false);
-
-        item.addEventListener('dragleave', (e) => {
-          e.currentTarget.classList.remove('drag-over');
-        }, false);
-
-        item.addEventListener('drop', (e) => {
-          e.preventDefault();
-          e.stopPropagation();
-          e.currentTarget.classList.remove('drag-over');
-          
-          if (state.draggedItem) {
-            const draggedId = state.draggedItem;
-            const droppedId = parseInt(e.currentTarget.dataset.itemId);
-            
-            if (draggedId !== droppedId) {
-              const draggedItem = state.items.find(i => i.id === draggedId);
-              const droppedItem = state.items.find(i => i.id === droppedId);
-              
-              if (draggedItem && droppedItem && draggedItem.listId === droppedItem.listId) {
-                const temp = draggedItem.order;
-                draggedItem.order = droppedItem.order;
-                droppedItem.order = temp;
-                saveState();
-                state.draggedItem = null;
-                render();
-              }
-            }
-          }
-        }, false);
-
-        // Mobile touch
-        item.addEventListener('touchstart', (e) => {
-          touchState.startY = e.touches[0].clientY;
-          touchState.draggedElement = e.currentTarget;
-          touchState.draggedItemId = parseInt(e.currentTarget.dataset.itemId);
-          e.currentTarget.style.opacity = '0.7';
-        }, false);
-
-        item.addEventListener('touchmove', (e) => {
-          if (!touchState.draggedItemId) return;
-          
-          const currentY = e.touches[0].clientY;
-          const allItems = Array.from(document.querySelectorAll('[data-item-id]'));
-          
-          allItems.forEach(el => {
-            const rect = el.getBoundingClientRect();
-            const mid = rect.top + rect.height / 2;
-            
-            if (currentY > mid && parseInt(el.dataset.itemId) !== touchState.draggedItemId) {
-              el.style.borderTop = '3px solid #6366f1';
-            } else {
-              el.style.borderTop = '';
-            }
-          });
-        }, false);
-
-        item.addEventListener('touchend', (e) => {
-          if (!touchState.draggedItemId) return;
-          
-          const currentY = e.changedTouches[0].clientY;
-          const allItems = Array.from(document.querySelectorAll('[data-item-id]'));
-          let targetItem = null;
-          
-          allItems.forEach(el => {
-            const rect = el.getBoundingClientRect();
-            const mid = rect.top + rect.height / 2;
-            if (currentY > mid && parseInt(el.dataset.itemId) !== touchState.draggedItemId) {
-              targetItem = el;
-            }
-            el.style.borderTop = '';
-          });
-          
-          if (targetItem) {
-            const draggedId = touchState.draggedItemId;
-            const droppedId = parseInt(targetItem.dataset.itemId);
-            
-            const draggedItem = state.items.find(i => i.id === draggedId);
-            const droppedItem = state.items.find(i => i.id === droppedId);
-            
-            if (draggedItem && droppedItem && draggedItem.listId === droppedItem.listId) {
-              const temp = draggedItem.order;
-              draggedItem.order = droppedItem.order;
-              droppedItem.order = temp;
-              saveState();
-            }
-          }
-          
-          if (touchState.draggedElement) {
-            touchState.draggedElement.style.opacity = '1';
-          }
-          touchState = { dragging: false, startY: 0, draggedElement: null, draggedItemId: null };
-          render();
-        }, false);
-      });
+      // No longer needed with arrow button approach
+      return;
     }
 
     function setState(updates) {
