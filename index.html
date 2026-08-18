@@ -227,12 +227,14 @@
       const item = state.items.find(i => i.id === id);
       if (item) {
         item.completed = !item.completed;
+        
+        // Move completed items to bottom
         if (item.completed) {
-          // Move to bottom
           const activeItems = state.items.filter(i => i.listId === state.activeList);
           const maxOrder = Math.max(...activeItems.map(i => i.order), -1);
           item.order = maxOrder + 1;
         }
+        
         saveState();
         render();
       }
@@ -624,11 +626,20 @@
       `;
     }
 
+    let touchState = {
+      dragging: false,
+      startY: 0,
+      draggedElement: null,
+      draggedItemId: null
+    };
+
     function attachDragListeners() {
       if (state.sortBy !== 'manual' || state.view !== 'tasks') return;
 
       const items = document.querySelectorAll('[data-item-id]');
+      
       items.forEach(item => {
+        // Desktop drag
         item.addEventListener('dragstart', (e) => {
           const itemId = parseInt(e.currentTarget.dataset.itemId);
           state.draggedItem = itemId;
@@ -680,6 +691,70 @@
               }
             }
           }
+        }, false);
+
+        // Mobile touch
+        item.addEventListener('touchstart', (e) => {
+          touchState.startY = e.touches[0].clientY;
+          touchState.draggedElement = e.currentTarget;
+          touchState.draggedItemId = parseInt(e.currentTarget.dataset.itemId);
+          e.currentTarget.style.opacity = '0.7';
+        }, false);
+
+        item.addEventListener('touchmove', (e) => {
+          if (!touchState.draggedItemId) return;
+          
+          const currentY = e.touches[0].clientY;
+          const allItems = Array.from(document.querySelectorAll('[data-item-id]'));
+          
+          allItems.forEach(el => {
+            const rect = el.getBoundingClientRect();
+            const mid = rect.top + rect.height / 2;
+            
+            if (currentY > mid && parseInt(el.dataset.itemId) !== touchState.draggedItemId) {
+              el.style.borderTop = '3px solid #6366f1';
+            } else {
+              el.style.borderTop = '';
+            }
+          });
+        }, false);
+
+        item.addEventListener('touchend', (e) => {
+          if (!touchState.draggedItemId) return;
+          
+          const currentY = e.changedTouches[0].clientY;
+          const allItems = Array.from(document.querySelectorAll('[data-item-id]'));
+          let targetItem = null;
+          
+          allItems.forEach(el => {
+            const rect = el.getBoundingClientRect();
+            const mid = rect.top + rect.height / 2;
+            if (currentY > mid && parseInt(el.dataset.itemId) !== touchState.draggedItemId) {
+              targetItem = el;
+            }
+            el.style.borderTop = '';
+          });
+          
+          if (targetItem) {
+            const draggedId = touchState.draggedItemId;
+            const droppedId = parseInt(targetItem.dataset.itemId);
+            
+            const draggedItem = state.items.find(i => i.id === draggedId);
+            const droppedItem = state.items.find(i => i.id === droppedId);
+            
+            if (draggedItem && droppedItem && draggedItem.listId === droppedItem.listId) {
+              const temp = draggedItem.order;
+              draggedItem.order = droppedItem.order;
+              droppedItem.order = temp;
+              saveState();
+            }
+          }
+          
+          if (touchState.draggedElement) {
+            touchState.draggedElement.style.opacity = '1';
+          }
+          touchState = { dragging: false, startY: 0, draggedElement: null, draggedItemId: null };
+          render();
         }, false);
       });
     }
