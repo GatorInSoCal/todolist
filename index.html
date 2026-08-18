@@ -260,6 +260,11 @@
       render();
     }
 
+    function openMoveModal(id) {
+      state.moveToModal = id;
+      render();
+    }
+
     function moveItem(itemId, targetListId) {
       const item = state.items.find(i => i.id === itemId);
       if (item) {
@@ -471,7 +476,7 @@
                   </div>
                   <div style="display: flex; gap: 0.5rem;">
                     <button onclick="openEditModal(${item.id})" style="background: none; border: none; color: ${secondaryText}; cursor: pointer; font-size: 1rem; padding: 0.5rem; transition: all 0.2s;">✏️</button>
-                    <button onclick="moveItem(${item.id}, null)" style="background: none; border: none; color: ${secondaryText}; cursor: pointer; font-size: 1rem; padding: 0.5rem; transition: all 0.2s;">↔️</button>
+                    <button onclick="openMoveModal(${item.id})" style="background: none; border: none; color: ${secondaryText}; cursor: pointer; font-size: 1rem; padding: 0.5rem; transition: all 0.2s;">↔️</button>
                     <button onclick="deleteItem(${item.id})" style="background: none; border: none; color: ${secondaryText}; cursor: pointer; font-size: 1rem; padding: 0.5rem; transition: all 0.2s;">🗑</button>
                   </div>
                 </div>
@@ -625,43 +630,57 @@
       const items = document.querySelectorAll('[data-item-id]');
       items.forEach(item => {
         item.addEventListener('dragstart', (e) => {
-          state.draggedItem = parseInt(e.currentTarget.dataset.itemId);
+          const itemId = parseInt(e.currentTarget.dataset.itemId);
+          state.draggedItem = itemId;
           e.currentTarget.classList.add('dragging');
           e.dataTransfer.effectAllowed = 'move';
-        });
+        }, false);
 
         item.addEventListener('dragend', (e) => {
           e.currentTarget.classList.remove('dragging');
+          items.forEach(el => el.classList.remove('drag-over'));
           state.draggedItem = null;
-        });
+        }, false);
 
         item.addEventListener('dragover', (e) => {
           e.preventDefault();
           e.dataTransfer.dropEffect = 'move';
-          if (state.draggedItem) {
+        }, false);
+
+        item.addEventListener('dragenter', (e) => {
+          if (state.draggedItem && e.currentTarget.dataset.itemId) {
             e.currentTarget.classList.add('drag-over');
           }
-        });
+        }, false);
 
         item.addEventListener('dragleave', (e) => {
           e.currentTarget.classList.remove('drag-over');
-        });
+        }, false);
 
         item.addEventListener('drop', (e) => {
           e.preventDefault();
+          e.stopPropagation();
           e.currentTarget.classList.remove('drag-over');
           
           if (state.draggedItem) {
-            const draggedItem = state.items.find(i => i.id === state.draggedItem);
-            const droppedItem = state.items.find(i => i.id === parseInt(e.currentTarget.dataset.itemId));
+            const draggedId = state.draggedItem;
+            const droppedId = parseInt(e.currentTarget.dataset.itemId);
             
-            if (draggedItem && droppedItem && draggedItem.listId === droppedItem.listId) {
-              [draggedItem.order, droppedItem.order] = [droppedItem.order, draggedItem.order];
-              saveState();
-              render();
+            if (draggedId !== droppedId) {
+              const draggedItem = state.items.find(i => i.id === draggedId);
+              const droppedItem = state.items.find(i => i.id === droppedId);
+              
+              if (draggedItem && droppedItem && draggedItem.listId === droppedItem.listId) {
+                const temp = draggedItem.order;
+                draggedItem.order = droppedItem.order;
+                droppedItem.order = temp;
+                saveState();
+                state.draggedItem = null;
+                render();
+              }
             }
           }
-        });
+        }, false);
       });
     }
 
